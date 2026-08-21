@@ -496,6 +496,47 @@ func TestVersionManager_UninstallMultiple(t *testing.T) {
 	}
 }
 
+// TestVersionManager_UninstallMultiple_MissingLockDir guards WriteWithCustomLockPath's
+// graceful-degradation behavior: an unusable LockPath (e.g. a misconfigured TENV_LOCK_PATH)
+// must log and continue rather than fail the operation.
+func TestVersionManager_UninstallMultiple_MissingLockDir(t *testing.T) {
+	t.Parallel()
+	tempDir := t.TempDir()
+
+	versions := []string{"1.0.0"}
+	for _, version := range versions {
+		versionDir := filepath.Join(tempDir, "terraform", version)
+		require.NoError(t, os.MkdirAll(versionDir, 0o755))
+	}
+
+	displayer := &MockDisplayer{}
+	displayer.On("Display", mock.Anything).Maybe()
+	displayer.On("Log", hclog.Error, "lock directory does not exist", mock.Anything).Once()
+
+	conf := &config.Config{
+		RootPath:  tempDir,
+		LockPath:  filepath.Join(tempDir, "does-not-exist"),
+		Displayer: displayer,
+	}
+
+	manager := VersionManager{
+		Conf:       conf,
+		FolderName: "terraform",
+	}
+
+	err := manager.UninstallMultiple(versions)
+
+	require.NoError(t, err, "a missing lock directory must not fail the uninstall")
+
+	for _, version := range versions {
+		versionDir := filepath.Join(tempDir, "terraform", version)
+		_, err := os.Stat(versionDir)
+		assert.True(t, os.IsNotExist(err), "Directory %s should be removed", versionDir)
+	}
+
+	displayer.AssertExpectations(t)
+}
+
 func TestVersionManager_checkVersionInstallation(t *testing.T) {
 	t.Parallel() // Create a temporary directory structure for testing
 	tempDir := t.TempDir()

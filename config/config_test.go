@@ -31,6 +31,8 @@ import (
 	"github.com/tofuutils/tenv/v4/pkg/loghelper"
 )
 
+const customRootPath = "/custom/tenv/path"
+
 // Helper functions for platform-specific paths.
 func getTestHomeDir() string {
 	// Use actual user home directory for testing
@@ -111,6 +113,10 @@ func TestDefaultConfig(t *testing.T) {
 
 	if cfg.WorkPath != "." {
 		t.Errorf("DefaultConfig() WorkPath = %v, want '.'", cfg.WorkPath)
+	}
+
+	if cfg.LockPath != cfg.RootPath {
+		t.Errorf("DefaultConfig() LockPath = %v, want equal to RootPath %v", cfg.LockPath, cfg.RootPath)
 	}
 
 	// Test that Getenv is set to EmptyGetenv
@@ -313,6 +319,7 @@ func getDefaultExpectedConfig() config.Config {
 		ForceRemote:      false,
 		GithubActions:    false,
 		GithubToken:      "",
+		LockPath:         getExpectedRootPath(),
 		RemoteConfPath:   "",
 		RootPath:         getExpectedRootPath(),
 		SkipInstall:      true,
@@ -328,7 +335,7 @@ func setupTestEnv(t *testing.T, envVars map[string]string) {
 	t.Helper()
 	envVarsToRestore := []string{
 		"HOME", "TENV_ARCH", "TENV_AUTO_INSTALL", "TENV_FORCE_REMOTE", "TENV_QUIET",
-		"TENV_ROOT", "TENV_GITHUB_TOKEN", "GITHUB_ACTIONS", "TENV_VALIDATION", "TENV_REMOTE_CONF",
+		"TENV_ROOT", "TENV_LOCK_PATH", "TENV_GITHUB_TOKEN", "GITHUB_ACTIONS", "TENV_VALIDATION", "TENV_REMOTE_CONF",
 		"TFENV_HASHICORP_PGP_KEY", "TOFUENV_OPENTOFU_PGP_KEY",
 	}
 
@@ -391,10 +398,40 @@ func TestInitConfigFromEnv(t *testing.T) {
 			name: "custom root path",
 			envVars: map[string]string{
 				"HOME":      getTestHomeDir(),
-				"TENV_ROOT": "/custom/tenv/path",
+				"TENV_ROOT": customRootPath,
 			},
 			modifyFunc: func(c config.Config) config.Config {
-				c.RootPath = "/custom/tenv/path"
+				c.RootPath = customRootPath
+				// LockPath defaults to RootPath for backward compatibility when unset.
+				c.LockPath = customRootPath
+
+				return c
+			},
+			expectError: false,
+		},
+		{
+			name: "custom lock path independent of root path",
+			envVars: map[string]string{
+				"HOME":           getTestHomeDir(),
+				"TENV_LOCK_PATH": "/custom/lock/path",
+			},
+			modifyFunc: func(c config.Config) config.Config {
+				c.LockPath = "/custom/lock/path"
+
+				return c
+			},
+			expectError: false,
+		},
+		{
+			name: "custom root and lock paths differ",
+			envVars: map[string]string{
+				"HOME":           getTestHomeDir(),
+				"TENV_ROOT":      customRootPath,
+				"TENV_LOCK_PATH": "/custom/lock/path",
+			},
+			modifyFunc: func(c config.Config) config.Config {
+				c.RootPath = customRootPath
+				c.LockPath = "/custom/lock/path"
 
 				return c
 			},
@@ -485,6 +522,7 @@ func TestInitConfigFromEnv(t *testing.T) {
 				assert.Equal(t, expected.ForceRemote, result.ForceRemote)
 				assert.Equal(t, expected.GithubActions, result.GithubActions)
 				assert.Equal(t, expected.GithubToken, result.GithubToken)
+				assert.Equal(t, expected.LockPath, result.LockPath)
 				assert.Equal(t, expected.RemoteConfPath, result.RemoteConfPath)
 				assert.Equal(t, expected.RootPath, result.RootPath)
 				assert.Equal(t, expected.SkipInstall, result.SkipInstall)
